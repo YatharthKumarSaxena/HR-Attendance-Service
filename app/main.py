@@ -621,8 +621,14 @@ class AttendanceRepository:
         history_entry: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         log_with_time(f"💾 [AttendanceRepository] Executing atomic regularize update for ID {doc_id} (expected history size={history_size})")
+        query: Dict[str, Any] = {"_id": doc_id}
+        if history_size == 0:
+            query["$or"] = [{"history": {"$size": 0}}, {"history": {"$exists": False}}, {"history": None}]
+        else:
+            query["history"] = {"$size": history_size}
+
         return self.coll.find_one_and_update(
-            {"_id": doc_id, "history": {"$size": history_size}},
+            query,
             {
                 "$set": updates,
                 "$push": {"history": history_entry}
