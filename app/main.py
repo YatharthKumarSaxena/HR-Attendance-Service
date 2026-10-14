@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional
 from bson import ObjectId, json_util
 from dotenv import load_dotenv
 from fastapi import APIRouter, FastAPI, HTTPException, Path, Query, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -237,7 +238,7 @@ def dt_to_epoch_ms(dt: Optional[datetime]) -> Optional[int]:
         return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return int(dt.timestamp() * 1000)
+    return int(round(dt.timestamp() * 1000))
 
 
 def parse_hh_mm(hh_mm_str: str) -> tuple[int, int]:
@@ -260,7 +261,7 @@ def compute_attendance_date(punch_in_utc: datetime, shift_start: str, shift_end:
     punch_in_ist = punch_in_utc.astimezone(IST)
     if is_overnight_shift(shift_start, shift_end):
         eh, em = parse_hh_mm(shift_end)
-        if (punch_in_ist.hour, punch_in_ist.minute) < (eh, em):
+        if punch_in_ist.time() < time(eh, em, 0):
             prev_day = punch_in_ist.date() - timedelta(days=1)
             return prev_day.isoformat()
     return punch_in_ist.date().isoformat()
@@ -398,7 +399,7 @@ class PunchInRequest(BaseModel):
     punched_at: Optional[int] = None
     status: str = StatusEnums.PRESENT
 
-    @field_validator("punched_at")
+    @field_validator("punched_at", mode="before")
     @classmethod
     def check_punched_at(cls, v):
         return validate_epoch_ms_nullable(v)
@@ -415,7 +416,7 @@ class PunchOutRequest(BaseModel):
     emp_code: str
     punched_at: Optional[int] = None
 
-    @field_validator("punched_at")
+    @field_validator("punched_at", mode="before")
     @classmethod
     def check_punched_at(cls, v):
         return validate_epoch_ms_nullable(v)
@@ -435,12 +436,12 @@ class RegularizeRequest(BaseModel):
             raise ValueError(f"status must be one of: {sorted(StatusEnums.ALL_SET)}")
         return v
 
-    @field_validator("punch_in")
+    @field_validator("punch_in", mode="before")
     @classmethod
     def check_punch_in(cls, v):
         return validate_epoch_ms_nullable(v)
 
-    @field_validator("punch_out")
+    @field_validator("punch_out", mode="before")
     @classmethod
     def check_punch_out(cls, v):
         return validate_epoch_ms_nullable(v)
@@ -1943,7 +1944,7 @@ def create_app() -> FastAPI:
         log_with_time(f"❌ [Request Validation Failed: 422] Path: {request.url.path}, Errors: {exc.errors()}")
         return JSONResponse(
             status_code=HttpStatus.UNPROCESSABLE_ENTITY,
-            content={"detail": exc.errors()}
+            content={"detail": jsonable_encoder(exc.errors())}
         )
 
     # 5. Register Routers
